@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "515590148576",
+    "project_id": "creativegen-11",
+    "storage_bucket": "creativegen-11.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:515590148576:android:c55624ab3484164d601b85",
+        "android_client_info": {
+          "package_name": "com.yourcompany.CreativeGen"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA2XRNWcqyt5pLdTcAZO0ekdG7AG80c_-w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
