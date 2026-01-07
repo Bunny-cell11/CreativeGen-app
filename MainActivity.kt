@@ -1,5 +1,6 @@
 package com.example.creativegen
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color.TRANSPARENT
 import android.net.Uri
@@ -9,343 +10,970 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.Canvas
+import androidx.activity.result.launch
+import androidx.compose.animation.core.copy
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+
+
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+
+
+
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.isEmpty
+
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.key.type
+
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.*
+import androidx.compose.ui.semantics.text
+
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.substring
+
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.get
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import coil.compose.AsyncImage
-import coil.imageLoader
-import coil.request.ImageRequest
+
+
+
+import coil.compose.rememberAsyncImagePainter
 import com.example.creativegen.ui.theme.CreativeGenTheme
+import com.github.skydoves.colorpicker.compose.HsvColorPicker
+import com.github.skydoves.colorpicker.compose.rememberColorPickerController
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
+import com.google.firebase.firestore.Exclude
 import com.google.firebase.firestore.ktx.firestore
+import com.google.firebase.firestore.ktx.toObject
 import com.google.firebase.ktx.Firebase
+import com.google.firebase.storage.ktx.storage
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.Segmentation
 import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
+import java.util.UUID
 import kotlin.math.roundToInt
 
-// ---------- NAVIGATION & DATA ----------
-object AppRoutes {
-    const val AUTH_GATE = "auth_gate"; const val SIGN_IN = "sign_in"; const val SIGN_UP = "sign_up"
-    const val PROJECTS_LIST = "projects_list"; const val EDITOR = "editor"
-}
 
-enum class ObjectType { ICON, TEXT, IMAGE }
-
-data class CanvasObject(
-    val id: String = System.currentTimeMillis().toString(),
-    val type: ObjectType,
-    var offset: Offset = Offset(50f, 50f),
-    var size: Size = Size(250f, 250f),
-    // Icon properties
-    val iconName: String? = null,
-    // Text properties
-    var text: String? = null,
-    var textColor: Int = Color.Black.hashCode(),
-    var fontSize: Float = 24f,
-    // Image properties
-    val imageUri: String? = null,
-    @get:com.google.firebase.firestore.Exclude @set:com.google.firebase.firestore.Exclude
-    var imageBitmap: Bitmap? = null
+// DATA CLASSES
+data class Project(
+    val id: String = "",
+    val name: String = "",
+    val timestamp: Long = 0L,
+    // Add 'val' to make it a property that Firestore can deserialize
+    val canvasObjects: List<CanvasObject>? = null
 )
 
-data class Project(val id: String = "", val name: String = "Untitled", val userId: String = "", val timestamp: Long = System.currentTimeMillis())
+data class CanvasObject(
+    val id: String = UUID.randomUUID().toString(),
+    val type: ObjectType,
+    var offset: Offset = Offset(100f, 100f),
+    var size: Size = Size(200f, 100f),
+    var text: String? = null,
+    var fontSize: Float = 32f,
+    var textColor: Int = Color.Black.toArgb(),
+    var fontFamily: String = "Default",
+    var iconName: String? = null,
+    var imageUri: String? = null,
+    @Transient var imageBitmap: Bitmap? = null
+)
+
+enum class ObjectType { TEXT, ICON, IMAGE }
+data class Size(val width: Float, val height: Float)
+
+data class BrandKit(
+    val id: String = "user_brand_kit",
+    val brandColors: List<Int> = listOf(Color.Red.toArgb(), Color.Blue.toArgb(), Color.Black.toArgb()),
+    val logoUrl: String? = null
+)
+
+data class ComplianceRule(val description: String, val predicate: (CanvasObject, Size) -> Boolean)
+data class ComplianceResult(val isSuccess: Boolean, val violations: List<String>)
 data class Template(val name: String, val objects: List<CanvasObject>)
+
 val templates = listOf(
-    Template("Birthday Card", listOf(
-        CanvasObject(type = ObjectType.TEXT, text = "Happy Birthday!", fontSize = 48f, offset = Offset(100f, 200f), textColor = Color(0xFFE91E63).hashCode()),
-        CanvasObject(type = ObjectType.ICON, iconName = "Favorite", offset = Offset(350f, 350f), size = Size(200f, 200f)),
-        CanvasObject(type = ObjectType.TEXT, text = "Have a great day!", fontSize = 24f, offset = Offset(120f, 600f))
+    Template("Title and Subtitle", listOf(
+        CanvasObject(type = ObjectType.TEXT, text = "Main Title", offset = Offset(100f, 200f), fontSize = 48f),
+        CanvasObject(type = ObjectType.TEXT, text = "Subtitle here", offset = Offset(100f, 300f), fontSize = 24f)
     )),
-    Template("Business Announcement", listOf(
-        CanvasObject(type = ObjectType.ICON, iconName = "Lightbulb", offset = Offset(150f, 100f), size = Size(150f, 150f)),
-        CanvasObject(type = ObjectType.TEXT, text = "Big News!", fontSize = 52f, offset = Offset(350f, 150f), textColor = Color(0xFF0D47A1).hashCode()),
-        CanvasObject(type = ObjectType.TEXT, text = "We're launching a new product next week.", fontSize = 20f, offset = Offset(150f, 400f))
+    Template("Iconic Statement", listOf(
+        CanvasObject(type = ObjectType.ICON, iconName = "Star", offset = Offset(150f, 200f), size = Size(120f, 120f)),
+        CanvasObject(type = ObjectType.TEXT, text = "New Arrival", offset = Offset(100f, 350f), fontSize = 32f)
     ))
 )
 
-// ---------- VIEWMODEL WITH FINAL FEATURE LOGIC ----------
-class AppViewModel : ViewModel() {
-    var currentProject by mutableStateOf<Project?>(null)
+// APP VIEWMODEL
+class AppViewModel : androidx.lifecycle.ViewModel() {
     val canvasObjects = mutableStateListOf<CanvasObject>()
-    var selectedObjectId by mutableStateOf<String?>(null)
-    var showTextEditDialog by mutableStateOf(false)
-    var isLoading by mutableStateOf(false)
+    var selectedObjectId by androidx.compose.runtime.mutableStateOf<String?>(null)
+    var showTextEditDialog by androidx.compose.runtime.mutableStateOf(false)
+    var showTemplateDialog by androidx.compose.runtime.mutableStateOf(false)
+    var isLoading by androidx.compose.runtime.mutableStateOf(false)
+    var showViolationsDialog by androidx.compose.runtime.mutableStateOf(false)
+    var brandKit by androidx.compose.runtime.mutableStateOf<BrandKit?>(null)
 
-    fun loadProject(project: Project, onComplete: () -> Unit) {
-        currentProject = project; selectedObjectId = null; canvasObjects.clear()
-        Firebase.firestore.collection("projects").document(project.id).collection("objects").get()
-            .addOnSuccessListener { snapshot ->
-                if (snapshot.isEmpty) { onComplete() } else {
-                    val objects = snapshot.toObjects(CanvasObject::class.java); canvasObjects.addAll(objects); onComplete()
+    private val _projects = kotlinx.coroutines.flow.MutableStateFlow<List<Project>>(emptyList())
+    val projects: StateFlow<List<Project>> = _projects
+    var currentProject: Project? by androidx.compose.runtime.mutableStateOf(null)
+        private set
+
+    // --- Get instances directly for stability ---
+    private val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+    private val firestore = com.google.firebase.Firebase.firestore
+    private val storage = com.google.firebase.Firebase.storage
+
+    init {
+        // We can check the instance directly now
+        if (auth.currentUser != null) {
+            loadProjects()
+            loadBrandKit()
+        }
+    }
+
+    fun loadProjects() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = auth.currentUser?.uid ?: return@launch
+            firestore.collection("users").document(userId).collection("projects")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        val projectList = snapshot.toObjects(Project::class.java)
+                        _projects.value = projectList
+                    }
                 }
-            }
+        }
     }
 
-    fun saveProject(onComplete: () -> Unit) {
-        val project = currentProject ?: return; val db = Firebase.firestore; val batch = db.batch()
-        val projectRef = db.collection("projects").document(project.id)
-        batch.set(projectRef, project.copy(timestamp = System.currentTimeMillis()))
-        canvasObjects.forEach { obj -> batch.set(projectRef.collection("objects").document(obj.id), obj.copy(imageBitmap = null)) }
-        batch.commit().addOnSuccessListener { onComplete() }
+
+    fun createProject(name: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = auth.currentUser?.uid ?: return@launch
+            val projectId = com.android.identity.util.UUID.randomUUID().toString()
+
+            val projectData = mapOf(
+                "id" to projectId,
+                "name" to name,
+                "timestamp" to System.currentTimeMillis(),
+                "canvasObjects" to emptyList<CanvasObject>()
+            )
+
+            firestore.collection("users").document(userId).collection("projects").document(projectId).set(projectData).await()
+        }
     }
 
-    fun applyTemplate(template: Template) {
+    fun loadProject(project: Project) {
+        currentProject = project
         canvasObjects.clear()
-        val newObjects = template.objects.map { it.copy(id = System.currentTimeMillis().toString() + (Math.random()*100).toInt()) }
-        canvasObjects.addAll(newObjects); selectedObjectId = null
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = auth.currentUser?.uid ?: return@launch
+            try {
+                val projectDoc = firestore
+                    .collection("users").document(userId)
+                    .collection("projects").document(project.id)
+                    .get().await()
+
+                val fullProject = projectDoc.toObject<Project>()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    canvasObjects.clear()
+                    canvasObjects.addAll(fullProject?.canvasObjects ?: emptyList())
+                }
+            } catch (e: Exception) {
+                // Handle exceptions
+            }
+        }
     }
 
-    fun addIconObject(iconName: String, offset: Offset) { canvasObjects.add(CanvasObject(type = ObjectType.ICON, iconName = iconName, offset = offset, size = Size(150f, 150f))) }
-    fun addTextObject(text: String, fontSize: Float) { canvasObjects.add(CanvasObject(type = ObjectType.TEXT, text = text, fontSize = fontSize)) }
-    fun addImageObject(uri: Uri) { canvasObjects.add(CanvasObject(type = ObjectType.IMAGE, imageUri = uri.toString())) }
+    fun deleteProject(projectId: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = auth.currentUser?.uid ?: return@launch
+            firestore.collection("users").document(userId).collection("projects").document(projectId).delete().await()
+        }
+    }
 
-    fun selectObject(objId: String?) { selectedObjectId = objId }
-    fun getSelectedObject(): CanvasObject? = canvasObjects.find { it.id == selectedObjectId }
+    fun saveProject(onSaved: () -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = auth.currentUser?.uid ?: return@launch
+            currentProject?.let {
+                val updatedProject = it.copy(canvasObjects = canvasObjects.toList(), timestamp = System.currentTimeMillis())
+                firestore.collection("users").document(userId).collection("projects").document(it.id).set(updatedProject).await()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onSaved() }
+            }
+        }
+    }
 
-    fun processSelectedImageWithML(context: android.content.Context) {
+    fun loadBrandKit() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = auth.currentUser?.uid ?: return@launch
+            val docRef = firestore.collection("users").document(userId).collection("brandKit").document("user_brand_kit")
+            val snapshot = docRef.get().await()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                brandKit = snapshot.toObject<BrandKit>() ?: BrandKit()
+            }
+        }
+    }
+
+    fun saveBrandKit(newBrandKit: BrandKit, onFinished: () -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = auth.currentUser?.uid ?: return@launch
+            firestore.collection("users").document(userId).collection("brandKit").document(newBrandKit.id).set(newBrandKit).await()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                brandKit = newBrandKit
+                onFinished()
+            }
+        }
+    }
+
+    fun uploadBrandLogo(uri: Uri, onFinished: (String) -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = auth.currentUser?.uid ?: return@launch
+            val storageRef = storage.reference.child("brand_logos/$userId/logo.png")
+            storageRef.putFile(uri).await()
+            val downloadUrl = storageRef.downloadUrl.await().toString()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                onFinished(downloadUrl)
+            }
+        }
+    }
+
+    fun processSelectedImageWithML(context: Context, onFinished: () -> Unit) {
         val selectedObject = getSelectedObject() ?: return
-        if (selectedObject.type != ObjectType.IMAGE || selectedObject.imageUri == null) return
+        val imageUriString = selectedObject.imageUri ?: return
+        if (selectedObject.type != ObjectType.IMAGE) return
+
         isLoading = true
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val inputImage = InputImage.fromFilePath(context, Uri.parse(selectedObject.imageUri))
-                val options = SelfieSegmenterOptions.Builder().setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE).build()
-                val segmenter = Segmentation.getClient(options)
+                val inputImage = com.google.mlkit.vision.common.InputImage.fromFilePath(context, Uri.parse(imageUriString))
+                val options = com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions.Builder()
+                    .setDetectorMode(com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+                    .build()
+                val segmenter = com.google.mlkit.vision.segmentation.Segmentation.getClient(options)
                 val segmentationMask = segmenter.process(inputImage).await()
-                val processedBitmap = removeBackground(segmentationMask.buffer, inputImage.width, inputImage.height, inputImage.bitmapInternal!!)
-                selectedObject.imageBitmap = processedBitmap
-                selectedObject.imageUri = null // No longer points to the original file
-                isLoading = false
-            } catch (e: Exception) {
-                isLoading = false
-                Toast.makeText(context, "Background removal failed", Toast.LENGTH_SHORT).show()
+                val bitmapToProcess = inputImage.bitmapInternal
+                if (bitmapToProcess != null) {
+                    val processedBitmap = removeBackground(segmentationMask.buffer, inputImage.width, inputImage.height, bitmapToProcess)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        val index = canvasObjects.indexOf(selectedObject)
+                        if (index != -1) {
+                            canvasObjects[index] = selectedObject.copy(imageBitmap = processedBitmap, imageUri = null)
+                        }
+                    }
+                }
+            } finally {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    isLoading = false
+                    onFinished()
+                }
             }
         }
     }
 
     private fun removeBackground(maskBuffer: ByteBuffer, imageWidth: Int, imageHeight: Int, originalBitmap: Bitmap): Bitmap {
         val resultBitmap = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888)
+        maskBuffer.rewind()
         for (y in 0 until imageHeight) {
             for (x in 0 until imageWidth) {
-                val bgConfidence = 1.0f - maskBuffer.float
-                if (bgConfidence > 0.6) { resultBitmap.setPixel(x, y, originalBitmap.getPixel(x, y)) }
-                else { resultBitmap.setPixel(x, y, TRANSPARENT) }
+                val confidence = maskBuffer.float
+                if (confidence > 0.6) { // Threshold can be adjusted
+                    resultBitmap.setPixel(x, y, originalBitmap.getPixel(x, y))
+                } else {
+                    resultBitmap.setPixel(x, y, TRANSPARENT)
+                }
             }
         }
-        maskBuffer.rewind()
         return resultBitmap
     }
 
-    fun updateObjectPosition(objId: String, dragAmount: Offset) { canvasObjects.find { it.id == objId }?.let { it.offset += dragAmount } }
-    fun updateTextContent(newText: String) { getSelectedObject()?.let { it.text = newText } }
+    private val complianceRules = listOf(
+        ComplianceRule("Text should not be in the bottom 15% of the canvas") { obj, canvasSize ->
+            !(obj.type == ObjectType.TEXT && obj.offset.y > canvasSize.height * 0.85)
+        },
+        ComplianceRule("Images must be at least 100x100 pixels") { obj, _ ->
+            !(obj.type == ObjectType.IMAGE && (obj.size.width < 100 || obj.size.height < 100))
+        }
+    )
+
+    fun validateCompliance(): ComplianceResult {
+        val violations = mutableListOf<String>()
+        val canvasSize = Size(1080f, 1920f)
+        canvasObjects.forEach { obj ->
+            complianceRules.forEach { rule ->
+                if (!rule.predicate(obj, canvasSize)) {
+                    violations.add("${obj.type} ('${obj.text?.take(10) ?: obj.id.substring(0,4)}...'): ${rule.description}")
+                }
+            }
+        }
+        return ComplianceResult(violations.isEmpty(), violations)
+    }
+
+    fun addTextObject(text: String, fontSize: Float) {
+        canvasObjects.add(CanvasObject(type = ObjectType.TEXT, text = text, fontSize = fontSize, textColor = brandKit?.brandColors?.firstOrNull() ?: androidx.compose.ui.graphics.Color.Black.toArgb()))
+    }
+
+    fun addIconObject(iconName: String) {
+        canvasObjects.add(CanvasObject(type = ObjectType.ICON, iconName = iconName, size = Size(100f, 100f)))
+    }
+
+    fun addImageObject(uri: Uri?, url: String? = null, size: Size = Size(300f, 300f)) {
+        if (uri == null && url == null) return
+        val objectUri = uri?.toString() ?: url
+        canvasObjects.add(CanvasObject(type = ObjectType.IMAGE, imageUri = objectUri, size = size))
+    }
+
+    fun selectObject(id: String?) {
+        selectedObjectId = id
+    }
+
+    fun getSelectedObject(): CanvasObject? {
+        return canvasObjects.find { it.id == selectedObjectId }
+    }
+
+    fun applyTemplate(template: Template) {
+        canvasObjects.addAll(template.objects)
+    }
+
+    fun updateObjectPosition(objId: String, dragAmount: androidx.compose.ui.geometry.Offset) {
+        canvasObjects.find { it.id == objId }?.let {
+            val index = canvasObjects.indexOf(it)
+            canvasObjects[index] = it.copy(offset = it.offset + dragAmount)
+        }
+    }
+
+    fun updateTextContent(newText: String) {
+        getSelectedObject()?.let {
+            val index = canvasObjects.indexOf(it)
+            if (index != -1) canvasObjects[index] = it.copy(text = newText)
+        }
+    }
+
+    fun updateTextColor(color: Int) {
+        getSelectedObject()?.let {
+            val index = canvasObjects.indexOf(it)
+            if (index != -1) canvasObjects[index] = it.copy(textColor = color)
+        }
+    }
+
+    fun updateTextFontFamily(fontFamily: String) {
+        getSelectedObject()?.let {
+            val index = canvasObjects.indexOf(it)
+            if (index != -1) {
+                canvasObjects[index] = it.copy(fontFamily = fontFamily)
+            }
+        }
+    }
+
     fun deleteSelectedObject() {
         selectedObjectId?.let { id ->
             canvasObjects.removeAll { it.id == id }
-            currentProject?.let { project -> Firebase.firestore.collection("projects").document(project.id).collection("objects").document(id).delete() }
             selectedObjectId = null
         }
     }
+
+    fun toggleViolationsDialog(show: Boolean) {
+        showViolationsDialog = show
+    }
 }
 
-// ---------- MAIN ACTIVITY & NAVIGATION (UNCHANGED) ----------
-class MainActivity : ComponentActivity() { override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { CreativeGenTheme { AppNavigation() } } } }
-@Composable
+// MAIN ACTIVITY & NAVIGATION
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent { CreativeGenTheme { AppNavigation() } }
+    }
+}
+
+object AppRoutes {
+    const val AUTH_GATE = "auth_gate"
+    const val SIGN_IN = "sign_in"
+    const val SIGN_UP = "sign_up"
+    const val PROJECTS_LIST = "projects_list"
+    const val BRAND_KIT = "brand_kit"
+    const val EDITOR = "editor"
+}
+
+@androidx.compose.runtime.Composable
 fun AppNavigation() {
-    val navController = rememberNavController(); val appViewModel: AppViewModel = viewModel()
+    val navController = rememberNavController()
+    val appViewModel: AppViewModel = viewModel()
     NavHost(navController = navController, startDestination = AppRoutes.AUTH_GATE) {
-        composable(AppRoutes.AUTH_GATE) { if (Firebase.auth.currentUser != null) LaunchedEffect(Unit) { navController.navigate(AppRoutes.PROJECTS_LIST) { popUpTo(0) } } else LaunchedEffect(Unit) { navController.navigate(AppRoutes.SIGN_IN) { popUpTo(0) } } }
-        composable(AppRoutes.SIGN_IN) { AuthScreen(navController = navController, isSignIn = true) }
-        composable(AppRoutes.SIGN_UP) { AuthScreen(navController = navController, isSignIn = false) }
+        composable(AppRoutes.AUTH_GATE) {
+            if (Firebase.auth.currentUser != null) {
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    navController.navigate(AppRoutes.PROJECTS_LIST) { popUpTo(0) }
+                }
+            } else {
+                androidx.compose.runtime.LaunchedEffect(Unit) { navController.navigate(AppRoutes.SIGN_IN) { popUpTo(0) } }
+            }
+        }
+        composable(AppRoutes.SIGN_IN) { AuthScreen(navController = navController, onSignInSuccess = {
+            appViewModel.loadProjects()
+            appViewModel.loadBrandKit()
+            navController.navigate(AppRoutes.PROJECTS_LIST) { popUpTo(AppRoutes.AUTH_GATE) { inclusive = true } }
+        }) }
+        composable(AppRoutes.SIGN_UP) { AuthScreen(navController = navController, isSignIn = false, onSignInSuccess = {
+            appViewModel.loadProjects()
+            appViewModel.loadBrandKit()
+            navController.navigate(AppRoutes.PROJECTS_LIST) { popUpTo(AppRoutes.AUTH_GATE) { inclusive = true } }
+        }) }
         composable(AppRoutes.PROJECTS_LIST) { ProjectsListScreen(navController = navController, appViewModel = appViewModel) }
+        composable(AppRoutes.BRAND_KIT) { BrandKitScreen(navController = navController, appViewModel = appViewModel) }
         composable(AppRoutes.EDITOR) { CanvaLikeEditor(navController = navController, appViewModel = appViewModel) }
     }
 }
 
-// ---------- AUTH & PROJECT LIST SCREENS (UNCHANGED) ----------
-@OptIn(ExperimentalMaterial3Api::class) @Composable fun AuthScreen(navController: NavController, isSignIn: Boolean) { /* ... same as before ... */ }
-@OptIn(ExperimentalMaterial3Api::class) @Composable fun ProjectsListScreen(navController: NavController, appViewModel: AppViewModel) { /* ... same as before ... */ }
+// AUTH, PROJECT LIST, BRAND KIT SCREENS
+@androidx.compose.runtime.Composable
+fun AuthScreen(navController: NavController, isSignIn: Boolean = true, onSignInSuccess: () -> Unit) {
+    val context = LocalContext.current
+    var email by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    var password by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    val auth = FirebaseAuth.getInstance()
 
-// ---------- EDITOR WITH FINAL FEATURES ----------
-@Composable
-fun CanvaLikeEditor(navController: NavController, appViewModel: AppViewModel) {
-    var draggedIcon by remember { mutableStateOf<Pair<String, Offset>?>(null) }
-    val selectedObject = appViewModel.getSelectedObject()
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            topBar = { EditorTopBar(projectName = appViewModel.currentProject?.name ?: "Untitled", onBack = { navController.popBackStack() }, onSave = { appViewModel.saveProject { navController.popBackStack() } }) },
-            bottomBar = {
-                EditorBottomBar(
-                    viewModel = appViewModel,
-                    onIconDragStart = { iconName, offset -> draggedIcon = iconName to offset },
-                    onIconDrag = { offsetChange -> draggedIcon = draggedIcon?.let { it.first to it.second + offsetChange } },
-                    onIconDragEnd = { draggedIcon?.let { (iconName, finalOffset) -> appViewModel.addIconObject(iconName, finalOffset) }; draggedIcon = null }
-                )
-            },
-            containerColor = Color(0xFF121417)
-        ) { innerPadding -> MainCanvas(modifier = Modifier.padding(innerPadding).fillMaxSize(), viewModel = appViewModel) }
-
-        if (appViewModel.isLoading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-        }
-
-        draggedIcon?.let { (iconName, offset) -> Icon(imageVector = iconMap[iconName]!!, contentDescription = null, tint = Color.White, modifier = Modifier.offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }.size(50.dp)) }
-
-        if (appViewModel.showTextEditDialog && selectedObject?.type == ObjectType.TEXT) {
-            TextEditDialog(initialText = selectedObject.text ?: "", onDismiss = { appViewModel.showTextEditDialog = false }, onConfirm = { newText -> appViewModel.updateTextContent(newText); appViewModel.showTextEditDialog = false })
+    androidx.compose.material3.Surface(modifier = Modifier.fillMaxSize(), color = androidx.compose.material3.MaterialTheme.colorScheme.background) {
+        androidx.compose.foundation.layout.Column(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            androidx.compose.material3.Text(if (isSignIn) "Sign In" else "Sign Up", style = androidx.compose.material3.MaterialTheme.typography.headlineLarge)
+            androidx.compose.foundation.layout.Spacer(Modifier.height(32.dp))
+            androidx.compose.material3.OutlinedTextField(value = email, onValueChange = { email = it }, label = { androidx.compose.material3.Text("Email") })
+            androidx.compose.foundation.layout.Spacer(Modifier.height(16.dp))
+            androidx.compose.material3.OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { androidx.compose.material3.Text("Password") },
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.height(32.dp))
+            androidx.compose.material3.Button(onClick = {
+                val action = if (isSignIn) auth.signInWithEmailAndPassword(email, password) else auth.createUserWithEmailAndPassword(email, password)
+                action.addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        onSignInSuccess()
+                    } else {
+                        Toast.makeText(context, "Authentication failed: ${task.exception?.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }) {
+                androidx.compose.material3.Text(if (isSignIn) "Sign In" else "Create Account")
+            }
+            androidx.compose.material3.TextButton(onClick = {
+                val route = if (isSignIn) AppRoutes.SIGN_UP else AppRoutes.SIGN_IN
+                navController.navigate(route) { popUpTo(AppRoutes.AUTH_GATE) }
+            }) {
+                androidx.compose.material3.Text(if (isSignIn) "Don't have an account? Sign Up" else "Already have an account? Sign In")
+            }
         }
     }
 }
-@OptIn(ExperimentalMaterial3Api::class) @Composable fun TextEditDialog(initialText: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) { /* ... same as before ... */ }
 
-// ---------- CANVAS WITH IMAGE DRAWING LOGIC ----------
-@OptIn(ExperimentalTextApi::class)
-@Composable
-fun MainCanvas(modifier: Modifier = Modifier, viewModel: AppViewModel) {
-    val textMeasurer = rememberTextMeasurer()
-    val context = LocalContext.current
-    Box(modifier = modifier.padding(16.dp).clip(MaterialTheme.shapes.medium), contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier.fillMaxWidth(0.9f).aspectRatio(1f).background(Color.White).pointerInput(Unit) { detectTapGestures(onTap = { viewModel.selectObject(null) }) }) {
-            viewModel.canvasObjects.forEach { obj -> drawObject(obj, isSelected = viewModel.selectedObjectId == obj.id, textMeasurer) }
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@androidx.compose.runtime.Composable
+fun ProjectsListScreen(navController: NavController, appViewModel: AppViewModel) {
+    val projects by appViewModel.projects.collectAsState()
+    var showCreateDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var newProjectName by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+
+    androidx.compose.material3.Scaffold(
+        topBar = {
+            androidx.compose.material3.TopAppBar(
+                title = { androidx.compose.material3.Text("My Projects") },
+                actions = {
+                    androidx.compose.material3.IconButton(onClick = { navController.navigate(AppRoutes.BRAND_KIT) }) {
+                        androidx.compose.material3.Icon(Icons.Default.Palette, contentDescription = "Brand Kit")
+                    }
+                    androidx.compose.material3.IconButton(onClick = { Firebase.auth.signOut(); navController.navigate(AppRoutes.AUTH_GATE) { popUpTo(0) } }) {
+                        androidx.compose.material3.Icon(Icons.Default.Logout, contentDescription = "Sign Out")
+                    }
+                }
+            ) },
+        floatingActionButton = { androidx.compose.material3.FloatingActionButton(onClick = { showCreateDialog = true }) { androidx.compose.material3.Icon(Icons.Default.Add, contentDescription = "New Project") } }
+    ) { padding ->
+        LazyColumn(contentPadding = padding) {
+            items(projects.sortedByDescending { it.timestamp }) { project ->
+                androidx.compose.material3.ListItem(
+                    headlineContent = { androidx.compose.material3.Text(project.name) },
+                    supportingContent = { androidx.compose.material3.Text("Last edited: ${java.text.SimpleDateFormat("MMM dd, yyyy").format(java.util.Date(project.timestamp))}") },
+                    modifier = Modifier.combinedClickable(
+                        onClick = {
+                            appViewModel.loadProject(project)
+                            navController.navigate(AppRoutes.EDITOR)
+                        },
+                        onLongClick = { appViewModel.deleteProject(project.id) }
+                    )
+                )
+            }
         }
-        viewModel.canvasObjects.forEach { obj ->
-            // Load bitmap for drawing if it's an image object from Firestore
-            if (obj.type == ObjectType.IMAGE && obj.imageUri != null && obj.imageBitmap == null) {
-                LaunchedEffect(obj.imageUri) {
-                    val request = ImageRequest.Builder(context).data(obj.imageUri).build()
-                    val result = context.imageLoader.execute(request).drawable
-                    obj.imageBitmap = (result as android.graphics.drawable.BitmapDrawable).bitmap
+    }
+
+    if (showCreateDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showCreateDialog = false },
+            title = { androidx.compose.material3.Text("New Project") },
+            text = { androidx.compose.material3.OutlinedTextField(value = newProjectName, onValueChange = { newProjectName = it }, label = { androidx.compose.material3.Text("Project Name") }) },
+            confirmButton = {
+                androidx.compose.material3.Button(onClick = {
+                    if (newProjectName.isNotBlank()) {
+                        appViewModel.createProject(newProjectName)
+                        showCreateDialog = false
+                        newProjectName = ""
+                    }
+                }) { androidx.compose.material3.Text("Create") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { showCreateDialog = false }) { androidx.compose.material3.Text("Cancel") } }
+        )
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@androidx.compose.runtime.Composable
+fun BrandKitScreen(navController: NavController, appViewModel: AppViewModel) {
+    val context = LocalContext.current
+    val brandKitInitial = appViewModel.brandKit ?: BrandKit()
+    var colors by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(brandKitInitial.brandColors) }
+    var logoUrl by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(brandKitInitial.logoUrl) }
+    val colorPickerController = rememberColorPickerController()
+    val imagePickerLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let {
+            appViewModel.isLoading = true
+            appViewModel.uploadBrandLogo(it) { url ->
+                logoUrl = url
+                appViewModel.isLoading = false
+            }
+        }
+    }
+
+    androidx.compose.material3.Scaffold(
+        topBar = {
+            androidx.compose.material3.TopAppBar(
+                title = { androidx.compose.material3.Text("Brand Kit") },
+                navigationIcon = { androidx.compose.material3.IconButton(onClick = { navController.popBackStack() }) { androidx.compose.material3.Icon(Icons.Default.ArrowBack, contentDescription = "Back") } }
+            )},
+        floatingActionButton = {
+            androidx.compose.material3.FloatingActionButton(onClick = {
+                val newKit = brandKitInitial.copy(brandColors = colors, logoUrl = logoUrl)
+                appViewModel.saveBrandKit(newKit) {
+                    Toast.makeText(context, "Brand Kit Saved!", Toast.LENGTH_SHORT).show()
+                    navController.popBackStack()
+                }
+            }) { androidx.compose.material3.Icon(Icons.Default.Save, "Save Brand Kit") }
+        }
+    ) { padding ->
+        androidx.compose.foundation.layout.Column(modifier = Modifier.padding(padding).padding(16.dp).fillMaxSize()) {
+            androidx.compose.material3.Text("Brand Colors", style = androidx.compose.material3.MaterialTheme.typography.titleLarge)
+            androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+            LazyRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                items(colors) { color ->
+                    androidx.compose.foundation.layout.Box(
+                        modifier = Modifier.size(40.dp).background(Color(color), CircleShape)
+                            .border(1.dp, Color.Gray, CircleShape)
+                    )
+                }
+                item {
+                    androidx.compose.foundation.layout.Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(Color.LightGray, CircleShape)
+                            .clickable {
+                                val newColor = colorPickerController.selectedColor.value.toArgb()
+                                if (!colors.contains(newColor)) {
+                                    colors = colors + newColor
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        androidx.compose.material3.Icon(
+                            Icons.Default.Add,
+                            contentDescription = "Add Color"
+                        )
+                    }
                 }
             }
-            Box(modifier = Modifier
-                .offset { IntOffset(obj.offset.x.roundToInt(), obj.offset.y.roundToInt()) }
-                .size(width = with(LocalDensity.current) { obj.size.width.toDp() }, height = with(LocalDensity.current) { obj.size.height.toDp() })
-                .pointerInput(obj.id) { detectTapGestures(onTap = { viewModel.selectObject(obj.id); if (obj.type == ObjectType.TEXT) viewModel.showTextEditDialog = true }) }
-                .pointerInput(obj.id) { detectDragGestures { change, dragAmount -> change.consume(); viewModel.updateObjectPosition(obj.id, dragAmount) } }
+            androidx.compose.foundation.layout.Spacer(Modifier.height(16.dp))
+            HsvColorPicker(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp),
+                controller = colorPickerController,
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.height(24.dp))
+            androidx.compose.material3.Text("Brand Logo", style = androidx.compose.material3.MaterialTheme.typography.titleLarge)
+            androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+            androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                if (logoUrl != null) {
+                    Image(painter = rememberAsyncImagePainter(logoUrl), contentDescription = "Brand Logo", modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)))
+                } else {
+                    androidx.compose.material3.Text("No logo uploaded.")
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                androidx.compose.material3.Button(onClick = { imagePickerLauncher.launch("image/*") }) { androidx.compose.material3.Text("Upload Logo") }
+            }
+            if (appViewModel.isLoading) {
+                androidx.compose.foundation.layout.Spacer(Modifier.height(16.dp))
+                androidx.compose.material3.CircularProgressIndicator()
+            }
+        }
+    }
+}
+
+// EDITOR COMPOSABLES
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@androidx.compose.runtime.Composable
+fun CanvaLikeEditor(navController: NavController, appViewModel: AppViewModel) {
+    val imagePickerLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? -> uri?.let { appViewModel.addImageObject(it) } }
+    val context = LocalContext.current
+
+    androidx.compose.material3.Scaffold(
+        topBar = {
+            androidx.compose.material3.TopAppBar(
+                title = { androidx.compose.material3.Text(appViewModel.currentProject?.name ?: "New Project") },
+                navigationIcon = { androidx.compose.material3.IconButton(onClick = { navController.navigate(AppRoutes.PROJECTS_LIST) { popUpTo(AppRoutes.EDITOR){ inclusive = true } } }) { androidx.compose.material3.Icon(Icons.Default.ArrowBack, contentDescription = "Projects") } },
+                actions = {
+                    androidx.compose.material3.IconButton(onClick = { appViewModel.saveProject { Toast.makeText(context, "Saved!", Toast.LENGTH_SHORT).show() } }) {
+                        androidx.compose.material3.Icon(Icons.Default.Save, contentDescription = "Save Project")
+                    }
+                }
+            )
+        },
+        bottomBar = {
+            EditorBottomBar(
+                appViewModel = appViewModel,
+                onAddIcon = { appViewModel.addIconObject(it) },
+                onAddText = { appViewModel.showTextEditDialog = true },
+                onAddImage = { imagePickerLauncher.launch("image/*") },
+                onApplyTemplate = { appViewModel.showTemplateDialog = true }
             )
         }
-        if (viewModel.canvasObjects.isEmpty()) { Text("Canvas is empty. Pick a template!", color = Color.Gray) }
+    ) { padding ->
+        androidx.compose.foundation.layout.Box(modifier = Modifier.padding(padding).fillMaxSize().background(Color.LightGray)) {
+            DrawingCanvas(appViewModel = appViewModel)
+            if (appViewModel.isLoading) {
+                androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            }
+            appViewModel.getSelectedObject()?.let {
+                ObjectToolbar(appViewModel = appViewModel, modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+            }
+            ComplianceStatus(appViewModel = appViewModel, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
+        }
+    }
+
+    if (appViewModel.showTextEditDialog) {
+        var textValue by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(appViewModel.getSelectedObject()?.text ?: "New Text") }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { appViewModel.showTextEditDialog = false },
+            title = { androidx.compose.material3.Text("Edit Text") },
+            text = { androidx.compose.material3.OutlinedTextField(value = textValue, onValueChange = { textValue = it }) },
+            confirmButton = {
+                androidx.compose.material3.Button(onClick = {
+                    if (appViewModel.getSelectedObject() != null) {
+                        appViewModel.updateTextContent(textValue)
+                    } else {
+                        appViewModel.addTextObject(textValue, 32f)
+                    }
+                    appViewModel.showTextEditDialog = false
+                }) { androidx.compose.material3.Text("OK") }
+            }
+        )
+    }
+
+    if (appViewModel.showTemplateDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { appViewModel.showTemplateDialog = false },
+            title = { androidx.compose.material3.Text("Apply a Template") },
+            text = {
+                LazyColumn {
+                    items(templates) { template ->
+                        androidx.compose.material3.Text(
+                            template.name,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    appViewModel.applyTemplate(template)
+                                    appViewModel.showTemplateDialog = false
+                                }
+                                .padding(16.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { appViewModel.showTemplateDialog = false }) { androidx.compose.material3.Text("Cancel") }
+            }
+        )
+    }
+
+    if (appViewModel.showViolationsDialog) {
+        val violations = appViewModel.validateCompliance().violations
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { appViewModel.toggleViolationsDialog(false) },
+            title = { androidx.compose.material3.Text("Compliance Violations") },
+            text = {
+                LazyColumn {
+                    items(violations) { violation ->
+                        androidx.compose.material3.Text(violation, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { appViewModel.toggleViolationsDialog(false) }) { androidx.compose.material3.Text("Close") }
+            }
+        )
     }
 }
 
-@OptIn(ExperimentalTextApi::class)
-fun DrawScope.drawObject(obj: CanvasObject, isSelected: Boolean, textMeasurer: TextMeasurer) {
-    when (obj.type) {
-        ObjectType.ICON -> {
-            iconMap[obj.iconName]?.let { icon -> val painter = rememberVectorPainter(image = icon); drawIntoCanvas { it.translate(obj.offset.x, obj.offset.y); with(painter) { draw(size = obj.size) }; it.translate(-obj.offset.x, -obj.offset.y) } }
-        }
-        ObjectType.TEXT -> {
-            obj.text?.let { text -> val style = TextStyle(color = Color(obj.textColor), fontSize = obj.fontSize.sp, fontWeight = FontWeight.Bold); val measuredText = textMeasurer.measure(text, style); obj.size = measuredText.size.toSize(); drawText(measuredText, topLeft = obj.offset) }
-        }
-        ObjectType.IMAGE -> {
-            obj.imageBitmap?.let { bmp -> drawImage(bmp.asImageBitmap(), dstOffset = IntOffset(obj.offset.x.roundToInt(), obj.offset.y.roundToInt()), dstSize = IntOffset(obj.size.width.roundToInt(), obj.size.height.roundToInt())) }
+@androidx.compose.runtime.Composable
+fun DrawingCanvas(appViewModel: AppViewModel) {
+    androidx.compose.foundation.layout.Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { appViewModel.selectObject(null) })
+            }
+    ) {
+        appViewModel.canvasObjects.forEach { canvasObject ->
+            CanvasObjectRenderer(
+                canvasObject = canvasObject,
+                appViewModel = appViewModel,
+                modifier = Modifier
+                    .offset { IntOffset(canvasObject.offset.x.roundToInt(), canvasObject.offset.y.roundToInt()) }
+                    .size(width = canvasObject.size.width.dp, height = canvasObject.size.height.dp)
+            )
         }
     }
-    if (isSelected) { drawRect(color = Color.Blue, topLeft = obj.offset, size = obj.size, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())) }
 }
 
-fun Size.toSize() = Size(width, height)
+@androidx.compose.runtime.Composable
+fun CanvasObjectRenderer(canvasObject: CanvasObject, appViewModel: AppViewModel, modifier: Modifier) {
+    val interactionModifier = Modifier.pointerInput(canvasObject.id) {
+        detectDragGestures(
+            onDragStart = { appViewModel.selectObject(canvasObject.id) },
+            onDrag = { _, dragAmount -> appViewModel.updateObjectPosition(canvasObject.id, dragAmount) }
+        )
+    }
+    val borderModifier = if (appViewModel.selectedObjectId == canvasObject.id) Modifier.border(1.dp, Color.Blue) else Modifier
 
-// ---------- BOTTOM BAR WITH UPLOADS & BG REMOVER ----------
-val iconMap = mapOf( "Star" to Icons.Outlined.Star, "Favorite" to Icons.Outlined.FavoriteBorder, "Circle" to Icons.Outlined.Circle, "Build" to Icons.Outlined.Build, "Call" to Icons.Outlined.Call, "Mail" to Icons.Outlined.Mail, "Location" to Icons.Outlined.LocationOn, "Cart" to Icons.Outlined.ShoppingCart, "Play" to Icons.Outlined.PlayArrow, "Lock" to Icons.Outlined.Lock, "Face" to Icons.Outlined.Face, "Home" to Icons.Outlined.Home, "Settings" to Icons.Outlined.Settings, "Search" to Icons.Outlined.Search, "Delete" to Icons.Outlined.Delete, "Edit" to Icons.Outlined.Edit, "Done" to Icons.Outlined.Done, "ThumbUp" to Icons.Outlined.ThumbUp, "Lightbulb" to Icons.Outlined.Lightbulb, "Camera" to Icons.Outlined.CameraAlt, "Music" to Icons.Outlined.MusicNote, "Cloud" to Icons.Outlined.Cloud, "Sun" to Icons.Outlined.WbSunny, "Moon" to Icons.Outlined.Brightness2, "Bed" to Icons.Outlined.LocalHotel, "Car" to Icons.Outlined.DirectionsCar )
+    androidx.compose.foundation.layout.Box(modifier = modifier.then(interactionModifier).then(borderModifier)) {
+        when (canvasObject.type) {
+            ObjectType.TEXT -> {
+                val fontFamily = when(canvasObject.fontFamily) {
+                    "Cursive" -> FontFamily.Cursive
+                    "Serif" -> FontFamily.Serif
+                    "Monospace" -> FontFamily.Monospace
+                    else -> FontFamily.Default
+                }
+                androidx.compose.material3.Text(
+                    text = canvasObject.text ?: "",
+                    fontSize = canvasObject.fontSize.sp,
+                    color = Color(canvasObject.textColor),
+                    fontFamily = fontFamily
+                )
+            }
+            ObjectType.ICON -> {
+                androidx.compose.material3.Icon(getIconByName(canvasObject.iconName), contentDescription = canvasObject.iconName, modifier = Modifier.fillMaxSize())
+            }
+            ObjectType.IMAGE -> {
+                val painter = if (canvasObject.imageBitmap != null) {
+                    androidx.compose.runtime.remember(canvasObject.imageBitmap) { androidx.compose.ui.graphics.painter.BitmapPainter(canvasObject.imageBitmap!!.asImageBitmap()) }
+                } else {
+                    rememberAsyncImagePainter(model = canvasObject.imageUri)
+                }
+                Image(painter = painter, contentDescription = "User Image", modifier = Modifier.fillMaxSize())
+            }
+        }
+    }
+}
 
-@Composable
-fun EditorBottomBar(viewModel: AppViewModel, onIconDragStart: (String, Offset) -> Unit, onIconDrag: (Offset) -> Unit, onIconDragEnd: () -> Unit) {
-    var selectedTab by remember { mutableStateOf("Templates") }
+@androidx.compose.runtime.Composable
+fun ObjectToolbar(appViewModel: AppViewModel, modifier: Modifier = Modifier) {
+    val selectedObject = appViewModel.getSelectedObject() ?: return
+    var showColorPicker by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showFontPicker by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val context = LocalContext.current
-    Column(modifier = Modifier.background(Color(0xFF1F222A))) {
-        Box(modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 100.dp), contentAlignment = Alignment.Center) {
-            AnimatedVisibility(visible = viewModel.selectedObjectId != null) {
-                val selectedObject = viewModel.getSelectedObject()
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Button(onClick = { viewModel.deleteSelectedObject() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Icon(Icons.Default.Delete, "Delete"); Spacer(Modifier.width(8.dp)); Text("Delete") }
-                    if (selectedObject?.type == ObjectType.TEXT) { Button(onClick = { viewModel.showTextEditDialog = true }) { Icon(Icons.Default.Edit, "Edit Text"); Spacer(Modifier.width(8.dp)); Text("Edit Text") } }
-                    if (selectedObject?.type == ObjectType.IMAGE) { Button(onClick = { viewModel.processSelectedImageWithML(context) }) { Icon(Icons.Default.ContentCut, "Remove BG"); Spacer(Modifier.width(8.dp)); Text("Remove BG") } }
+
+    if (showColorPicker) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showColorPicker = false },
+            title = { androidx.compose.material3.Text("Select Color") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    val controller = rememberColorPickerController()
+                    LazyRow(modifier = Modifier.padding(bottom = 16.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                        items(appViewModel.brandKit?.brandColors ?: emptyList()) { color ->
+                            androidx.compose.foundation.layout.Box(modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color(color))
+                                .clickable {
+                                    appViewModel.updateTextColor(color)
+                                    showColorPicker = false
+                                })
+                        }
+                    }
+                    HsvColorPicker(modifier = Modifier.fillMaxWidth().height(300.dp), controller = controller)
+                    androidx.compose.material3.Button(onClick = {
+                        appViewModel.updateTextColor(controller.selectedColor.value.toArgb())
+                        showColorPicker = false
+                    }, modifier = Modifier.align(Alignment.End)) {
+                        androidx.compose.material3.Text("Select")
+                    }
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    androidx.compose.material3.Card(modifier = modifier, shape = RoundedCornerShape(16.dp)) {
+        androidx.compose.foundation.layout.Row(modifier = Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (selectedObject.type == ObjectType.TEXT) {
+                androidx.compose.material3.IconButton(onClick = { appViewModel.showTextEditDialog = true }) { androidx.compose.material3.Icon(Icons.Default.Edit, "Edit Text") }
+                androidx.compose.material3.IconButton(onClick = { showColorPicker = true }) { androidx.compose.material3.Icon(Icons.Default.Colorize, "Change Color") }
+                androidx.compose.foundation.layout.Box {
+                    androidx.compose.material3.IconButton(onClick = { showFontPicker = true }) { androidx.compose.material3.Icon(Icons.Default.FontDownload, "Change Font") }
+                    androidx.compose.material3.DropdownMenu(expanded = showFontPicker, onDismissRequest = { showFontPicker = false }) {
+                        listOf("Default", "Cursive", "Serif", "Monospace").forEach { fontName ->
+                            androidx.compose.material3.DropdownMenuItem(text = { androidx.compose.material3.Text(fontName) }, onClick = {
+                                appViewModel.updateTextFontFamily(fontName)
+                                showFontPicker = false
+                            })
+                        }
+                    }
                 }
             }
-            AnimatedVisibility(visible = viewModel.selectedObjectId == null) {
-                when (selectedTab) {
-                    "Templates" -> TemplateLibrary(onTemplateClick = { template -> viewModel.applyTemplate(template) })
-                    "Elements" -> IconLibrary(onIconDragStart, onIconDrag, onIconDragEnd)
-                    "Text" -> TextToolActions(onAddText = { text, size -> viewModel.addTextObject(text, size) })
-                    "Uploads" -> UploadsTab(onImageSelected = { uri -> viewModel.addImageObject(uri) })
-                    else -> Text("$selectedTab content goes here", color = Color.White)
-                }
+            if (selectedObject.type == ObjectType.IMAGE && selectedObject.imageUri != null) {
+                androidx.compose.material3.Button(onClick = {
+                    appViewModel.processSelectedImageWithML(context) {
+                        Toast.makeText(context, "Background Removed!", Toast.LENGTH_SHORT).show()
+                    }
+                }, enabled = !appViewModel.isLoading) { androidx.compose.material3.Text("Remove BG") }
+            }
+            androidx.compose.material3.IconButton(onClick = { appViewModel.deleteSelectedObject() }) { androidx.compose.material3.Icon(Icons.Default.Delete, "Delete") }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+fun EditorBottomBar(appViewModel: AppViewModel, onAddIcon: (String) -> Unit, onAddText: () -> Unit, onAddImage: () -> Unit, onApplyTemplate: () -> Unit) {
+    var showIconPicker by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    androidx.compose.material3.BottomAppBar {
+        androidx.compose.material3.IconButton(onClick = onAddText) { androidx.compose.material3.Icon(Icons.Default.TextFields, "Add Text") }
+        androidx.compose.material3.IconButton(onClick = onAddImage) { androidx.compose.material3.Icon(Icons.Default.Image, "Add Image") }
+        androidx.compose.material3.IconButton(onClick = { showIconPicker = true }) { androidx.compose.material3.Icon(Icons.Default.Star, "Add Icon") }
+        androidx.compose.material3.IconButton(onClick = onApplyTemplate) { androidx.compose.material3.Icon(Icons.Default.AutoAwesome, "Apply Template") }
+
+        appViewModel.brandKit?.logoUrl?.let { logoUrl ->
+            androidx.compose.material3.IconButton(onClick = { appViewModel.addImageObject(null, logoUrl, size = Size(150f, 150f)) }) {
+                androidx.compose.material3.Icon(Icons.Default.Business, "Add Brand Logo")
             }
         }
-        Divider(color = Color(0xFF33363F))
-        EditorNavigationBar(selectedTab) { newTab -> selectedTab = newTab }
+
+        if (showIconPicker) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showIconPicker = false },
+                title = { androidx.compose.material3.Text("Select an Icon") },
+                text = {
+                    val iconList = listOf("Star", "Favorite", "Settings", "Build", "Info", "ThumbUp", "Home", "Face", "ShoppingCart")
+                    LazyColumn {
+                        items(iconList) { iconName ->
+                            androidx.compose.material3.ListItem(
+                                headlineContent = { androidx.compose.material3.Text(iconName) },
+                                leadingContent = { androidx.compose.material3.Icon(getIconByName(iconName), null) },
+                                modifier = Modifier.clickable {
+                                    onAddIcon(iconName)
+                                    showIconPicker = false
+                                }
+                            )
+                        }
+                    }
+                },
+                confirmButton = { androidx.compose.material3.TextButton(onClick = { showIconPicker = false }) { androidx.compose.material3.Text("Cancel") } }
+            )
+        }
     }
 }
 
-// ---------- NEW UPLOADS TAB UI ----------
-@Composable
-fun UploadsTab(onImageSelected: (Uri) -> Unit) {
-    val imagePickerLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri: Uri? -> uri?.let(onImageSelected) }
-    Button(onClick = { imagePickerLauncher.launch("image/*") }) {
-        Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Upload Image")
-        Spacer(Modifier.width(8.dp))
-        Text("Upload Image")
+@androidx.compose.runtime.Composable
+fun ComplianceStatus(appViewModel: AppViewModel, modifier: Modifier = Modifier) {
+    val complianceResult = appViewModel.validateCompliance()
+    val statusColor = if (complianceResult.isSuccess) Color(0xFF1B5E20) else Color(0xFFB71C1C)
+    val statusText = if (complianceResult.isSuccess) "Compliance: Passed" else "Compliance: Failed (${complianceResult.violations.size})"
+
+    androidx.compose.material3.Card(
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier.clickable(enabled = !complianceResult.isSuccess) { appViewModel.toggleViolationsDialog(true) },
+        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = statusColor)
+    ) {
+        androidx.compose.foundation.layout.Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.Icon(if (complianceResult.isSuccess) Icons.Default.CheckCircle else Icons.Default.Warning, contentDescription = "Status", tint = Color.White)
+            androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+            androidx.compose.material3.Text(statusText, color = Color.White, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
-// ---------- OTHER UNCHANGED UI COMPONENTS ----------
-@OptIn(ExperimentalTextApi::class) @Composable fun TemplateLibrary(onTemplateClick: (Template) -> Unit) { /* ... same as before ... */ }
-@Composable fun TextToolActions(onAddText: (String, Float) -> Unit) { /* ... same as before ... */ }
-@Composable fun IconLibrary(onIconDragStart: (String, Offset) -> Unit, onIconDrag: (Offset) -> Unit, onIconDragEnd: () -> Unit) { /* ... same as before ... */ }
-@OptIn(ExperimentalMaterial3ai::class) @Composable fun EditorTopBar(projectName: String, onBack: () -> Unit, onSave: () -> Unit) { /* ... same as before ... */ }
-@Composable fun EditorNavigationBar(selectedTab: String, onTabSelected: (String) -> Unit) { /* ... same as before ... */ }
-fun getIconForTab(tab: String): ImageVector { /* ... same as before ... */ return when (tab) { "Templates" -> Icons.Default.Dashboard; "Elements" -> Icons.Default.Category; "Text" -> Icons.Default.TextFields; "Uploads" -> Icons.Default.CloudUpload; "Draw" -> Icons.Default.Draw; else -> Icons.Default.MoreHoriz } }
+fun getIconByName(name: String?): androidx.compose.ui.graphics.vector.ImageVector {
+    return when (name) {
+        "Star" -> Icons.Default.Star
+        "Favorite" -> Icons.Default.Favorite
+        "Settings" -> Icons.Default.Settings
+        "Build" -> Icons.Default.Build
+        "Info" -> Icons.Default.Info
+        "ThumbUp" -> Icons.Default.ThumbUp
+        "Home" -> Icons.Default.Home
+        "Face" -> Icons.Default.Face
+        "ShoppingCart" -> Icons.Default.ShoppingCart
+        else -> Icons.Default.Help
+    }
+}
